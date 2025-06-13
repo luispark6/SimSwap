@@ -6,6 +6,7 @@ from torch.nn import functional as F
 import torch.nn as nn
 import line_profiler
 
+
 def get_gaussian_kernel2d(kernel_size=21, sigma=3, channels=1):
     # Create 1D Gaussian kernel
     x = torch.arange(kernel_size) - kernel_size // 2
