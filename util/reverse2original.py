@@ -4,27 +4,43 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 import torch.nn as nn
+import line_profiler
 
+def get_gaussian_kernel2d(kernel_size=21, sigma=3, channels=1):
+    # Create 1D Gaussian kernel
+    x = torch.arange(kernel_size) - kernel_size // 2
+    gauss_1d = torch.exp(-x**2 / (2 * sigma**2))
+    gauss_1d /= gauss_1d.sum()
+
+    # Outer product to get 2D kernel
+    gauss_2d = torch.outer(gauss_1d, gauss_1d)
+    gauss_2d = gauss_2d.expand(channels, 1, kernel_size, kernel_size)
+    return gauss_2d
+
+
+def gpu_gaussian_blur(img_tensor, kernel_size=21, sigma=3):
+    channels = img_tensor.shape[1]
+    kernel = get_gaussian_kernel2d(kernel_size, sigma, channels).to(img_tensor.device)
+    padding = kernel_size // 2
+    blurred = F.conv2d(img_tensor, kernel, padding=padding, groups=channels)
+    return blurred
+
+
+def torch_erode(mask_tensor, kernel_size=40):
+    padding = kernel_size // 2
+    eroded = -F.max_pool2d(-mask_tensor, kernel_size, stride=1, padding=padding)
+    return eroded
+import numpy as np
 
 def encode_segmentation_rgb(segmentation, no_neck=True):
-    parse = segmentation
-
-    face_part_ids = [1, 2, 3, 4, 5, 6, 10, 12, 13] if no_neck else [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14]
+    face_part_ids = {1, 2, 3, 4, 5, 6, 10, 12, 13} if no_neck else {1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14}
     mouth_id = 11
-    # hair_id = 17
-    face_map = np.zeros([parse.shape[0], parse.shape[1]])
-    mouth_map = np.zeros([parse.shape[0], parse.shape[1]])
-    # hair_map = np.zeros([parse.shape[0], parse.shape[1]])
 
-    for valid_id in face_part_ids:
-        valid_index = np.where(parse==valid_id)
-        face_map[valid_index] = 255
-    valid_index = np.where(parse==mouth_id)
-    mouth_map[valid_index] = 255
-    # valid_index = np.where(parse==hair_id)
-    # hair_map[valid_index] = 255
-    #return np.stack([face_map, mouth_map,hair_map], axis=2)
-    return np.stack([face_map, mouth_map], axis=2)
+    # Vectorized masks
+    face_map = np.isin(segmentation, list(face_part_ids)) * 255
+    mouth_map = (segmentation == mouth_id) * 255
+
+    return np.stack([face_map.astype(np.uint8), mouth_map.astype(np.uint8)], axis=2)
 
 
 class SoftErosion(nn.Module):
@@ -72,6 +88,9 @@ def postprocess(swapped_face, target, target_mask,smooth_mask):
     result = result[:,:,::-1]# .astype(np.uint8)
     return result
 
+
+
+# @line_profiler.profile
 def reverse2wholeimage(b_align_crop_tenor_list,swaped_imgs, mats, crop_size, oriimg, logoclass, save_path = '', \
                     no_simswaplogo = False,pasring_model =None,norm = None, use_mask = False):
 
@@ -104,8 +123,10 @@ def reverse2wholeimage(b_align_crop_tenor_list,swaped_imgs, mats, crop_size, ori
         if use_mask:
             source_img_norm = norm(source_img)
             source_img_512  = F.interpolate(source_img_norm,size=(512,512))
-            out = pasring_model(source_img_512)[0]
-            parsing = out.squeeze(0).detach().cpu().numpy().argmax(0)
+            print(type(pasring_model))
+            with torch.no_grad():
+                out = pasring_model(source_img_512)[0]
+            parsing = torch.argmax(out.squeeze(0), dim=0).byte().cpu().numpy()
             vis_parsing_anno = parsing.copy().astype(np.uint8)
             tgt_mask = encode_segmentation_rgb(vis_parsing_anno)
             if tgt_mask.sum() >= 5000:
@@ -134,11 +155,16 @@ def reverse2wholeimage(b_align_crop_tenor_list,swaped_imgs, mats, crop_size, ori
         #     kernel = np.ones((40,40),np.uint8)
         #     img_mask = cv2.erode(img_mask,kernel,iterations = 1)
         # else:
-        kernel = np.ones((40,40),np.uint8)
-        img_mask = cv2.erode(img_mask,kernel,iterations = 1)
-        kernel_size = (20, 20)
-        blur_size = tuple(2*i+1 for i in kernel_size)
-        img_mask = cv2.GaussianBlur(img_mask, blur_size, 0)
+        # Input: mask as [1, 1, H, W] float tensor on GPU
+        img_mask_tensor = torch.from_numpy(img_mask).unsqueeze(0).unsqueeze(0).float().cuda()
+        img_mask_eroded = torch_erode(img_mask_tensor, kernel_size=41)
+        img_mask = img_mask_eroded.squeeze().cpu().numpy()
+        # blur_size = tuple(2*i+1 for i in kernel_size)
+        img_mask_tensor = torch.from_numpy(img_mask).unsqueeze(0).unsqueeze(0).float().cuda()  # [1, 1, H, W]
+        img_mask_blurred = gpu_gaussian_blur(img_mask_tensor, kernel_size=41, sigma=5.0)  # You can tune these
+
+        img_mask = img_mask_blurred.squeeze().cpu().numpy()
+
 
         # kernel = np.ones((10,10),np.uint8)
         # img_mask = cv2.erode(img_mask,kernel,iterations = 1)
@@ -153,23 +179,36 @@ def reverse2wholeimage(b_align_crop_tenor_list,swaped_imgs, mats, crop_size, ori
 
         # target_image_parsing = postprocess(target_image, source_image, tgt_mask)
 
-        if use_mask:
-            target_image = np.array(target_image, dtype=np.float) * 255
-        else:
-            target_image = np.array(target_image, dtype=np.float)[..., ::-1] * 255
+        arr = np.asarray(target_image, dtype=np.float32)
+        if not use_mask:
+            arr = arr[..., ::-1].copy()
+        np.multiply(arr, 255, out=arr)
+        target_image = arr 
 
 
+        
         img_mask_list.append(img_mask)
         target_image_list.append(target_image)
         
 
     # target_image /= 255
     # target_image = 0
-    img = np.array(oriimg, dtype=np.float)
-    for img_mask, target_image in zip(img_mask_list, target_image_list):
-        img = img_mask * target_image + (1-img_mask) * img
-        
-    final_img = img.astype(np.uint8)
+     # ---- GPU Parallel Blending with Sequential Dependency ----
+    img_tensor = torch.tensor(np.array(oriimg, dtype=float), dtype=torch.float32).to('cuda')  # [H, W, C]
+
+    for img_mask_np, target_image_np in zip(img_mask_list, target_image_list):
+        img_mask = torch.tensor(img_mask_np, dtype=torch.float32).to('cuda')  # [H, W, 1]
+        target_image = torch.tensor(target_image_np, dtype=torch.float32).to('cuda')  # [H, W, C]
+
+        if img_mask.ndim == 2:
+            img_mask = img_mask.unsqueeze(-1)
+
+        img_tensor = img_mask * target_image + (1 - img_mask) * img_tensor
+
+    final_img = img_tensor.clamp(0, 255).byte().cpu().numpy()
+
+    # final_img = img.astype(np.uint8)
+
     if not no_simswaplogo:
         final_img = logoclass.apply_frames(final_img)
-    cv2.imwrite(save_path, final_img)
+    return final_img

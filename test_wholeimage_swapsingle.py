@@ -37,6 +37,8 @@ def _totensor(array):
 if __name__ == '__main__':
     opt = TestOptions().parse()
 
+    #make an opt object rather than parsing. 
+
     start_epoch, epoch_iter = 1, 0
     crop_size = opt.crop_size
 
@@ -50,6 +52,7 @@ if __name__ == '__main__':
     logoclass = watermark_image('./simswaplogo/simswaplogo.png')
     model = create_model(opt)
     model.eval()
+    print(type(model))
 
     spNorm =SpecificNorm()
     app = Face_detect_crop(name='antelope', root='./insightface_func/models')
@@ -57,7 +60,6 @@ if __name__ == '__main__':
 
     with torch.no_grad():
         pic_a = opt.pic_a_path
-
         img_a_whole = cv2.imread(pic_a)
         img_a_align_crop, _ = app.get(img_a_whole,crop_size)
         img_a_align_crop_pil = Image.fromarray(cv2.cvtColor(img_a_align_crop[0],cv2.COLOR_BGR2RGB)) 

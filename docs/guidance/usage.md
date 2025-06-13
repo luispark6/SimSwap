@@ -19,6 +19,11 @@ python test_one_image.py --name people --Arc_path arcface_model/arcface_checkpoi
 
 ### Face swapping for video
 
+- Swap one face on a live camera(pic_a will be the refrence picture and will be swapped onto whatever face shown on the live camera)
+```
+python test_wholeimage_swapsingle.py --crop_size 224 --name people --Arc_path arcface_model/arcface_checkpoint.tar --pic_a_path ./demo_file/Iron_man.jpg
+```
+
 - Swap only one face within the video(the one with highest confidence by face detection).
 ```
 python test_video_swapsingle.py --crop_size 224 --use_mask --name people --Arc_path arcface_model/arcface_checkpoint.tar --pic_a_path ./demo_file/Iron_man.jpg --video_path ./demo_file/multi_people_1080p.mp4 --output_path ./output/multi_test_swapsingle.mp4 --temp_path ./temp_results 

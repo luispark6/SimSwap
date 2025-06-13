@@ -78,7 +78,8 @@ if __name__ == '__main__':
         full = row3.detach()
         full = full.permute(1, 2, 0)
         output = full.to('cpu')
-        output = np.array(output)
+        print(type(output))
+        output = output.detach().cpu().numpy()
         output = output[..., ::-1]
 
         output = output*255
