@@ -26,6 +26,7 @@ from util.plot import plot_batch
 
 from models.projected_model import fsModel
 from data.data_loader_Swapping import GetLoader
+import wandb
 
 def str2bool(v):
     return v.lower() in ('true')
