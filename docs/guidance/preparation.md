@@ -12,6 +12,8 @@ conda install pytorch==1.8.0 torchvision==0.9.0 torchaudio==0.8.0 cudatoolkit=10
 pip install insightface==0.2.1 onnxruntime moviepy
 (option): pip install onnxruntime-gpu  (If you want to reduce the inference time)(It will be diffcult to install onnxruntime-gpu , the specify version of onnxruntime-gpu may depends on your machine and cuda version.)
 pip install line_profiler
+pip3 install -U timm==0.5.4
+pip install tensorboard==2.19.0
 ```
 **Download Below for GPU face detection model build:**
 ```
@@ -24,6 +26,9 @@ pip3 install torch torchvision torchaudio --index-url https://download.pytorch.o
 pip install insightface==0.2.1 onnxruntime-gpu==1.22.0 moviepy
 
 pip install line_profiler
+
+pip install tensorboard==2.19.0
+
 ```
 **If you are using GPU for face detection, you must follow this next step:**
 ```
